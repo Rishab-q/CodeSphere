@@ -1,0 +1,23 @@
+# Use a minimal base image
+FROM debian:12-slim
+
+# Install necessary compilers, runtimes, and utilities (like timeout)
+# Updated openjdk-11-jdk to openjdk-17-jdk-headless for Debian 12 compatibility
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    openjdk-17-jdk-headless \
+    python3 \
+    nodejs \
+    coreutils \
+    && rm -rf /var/lib/apt/lists/*
+
+
+RUN useradd -m -u 1001 appuser && \
+    mkdir /sandbox && \
+    chown -R appuser:appuser /sandbox
+# Switch to the non-root user
+USER appuser
+
+# Set the working directory for the sandbox
+WORKDIR /sandbox

@@ -1,0 +1,100 @@
+version: '3.8'
+
+services:
+  backend:
+    build: ./backend
+    # The new environment variable for the database URL
+    environment:
+      - DATABASE_URL=postgresql://postgres:Rishab%401@db/mydatabase
+      - PYTHONUNBUFFERED=1
+    ports:
+      # Expose the backend port so you can test it directly with an API client
+      - "8000:8000"
+    volumes:
+      - ./backend/app:/app/app
+    depends_on:
+      - redis
+      - db # Add dependency on the new database service
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    
+  frontend:
+    build: ./frontend
+    ports:
+      # Maps port 3000 on your local machine to port 80 in the Nginx container.
+      - "3000:80"
+    depends_on:
+      - backend
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  redis:
+    image: "redis:alpine"
+    ports:
+      - "6379:6379"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  worker:
+    build: ./worker
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./temp_jobs:/app/temp_jobs
+    environment:
+      - PYTHONUNBUFFERED=1
+      - HOST_PROJECT_DIR=${PWD}
+    depends_on:
+      - redis
+      - code-executor-sandbox
+    pull_policy: never
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # New PostgreSQL Database Service
+  db:
+    image: postgres:13-alpine
+    volumes:
+      # This volume will persist the database data on your host machine
+      - postgres_data:/var/lib/postgresql/data/
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=Rishab@1
+      - POSTGRES_DB=mydatabase
+    ports:
+      # Optional: Expose port 5432 to connect with a DB client from your host
+      - "5432:5432"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  code-executor-sandbox:
+    build:
+      context: .
+      dockerfile: Dockerfile.sandbox
+    image: code-executor-sandbox
+    command: ["sleep", "infinity"]
+    pull_policy: never
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+
+# Define the named volume for data persistence
+volumes:
+  postgres_data:
