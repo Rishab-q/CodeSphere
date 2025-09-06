@@ -45,3 +45,12 @@ class CodeFile(CodeFileBase):
     created_at: datetime
     class Config:
         orm_mode = True
+
+class SharedCodeFile(BaseModel):
+    filename: str
+    language: str
+    code: str
+    owner_username: str
+
+    class Config:
+        from_attributes = True

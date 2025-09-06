@@ -11,6 +11,7 @@ class CodeFile(Base):
     code = Column(Text, nullable=False)
     owner_username = Column(String, index=True, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    share_id = Column(String, unique=True, index=True, nullable=True)
     
     __table_args__ = (
         UniqueConstraint("owner_username", "filename", name="uq_user_filename"),

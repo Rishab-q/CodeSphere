@@ -7,4 +7,5 @@ passlib[bcrypt]
 sqlalchemy
 psycopg2-binary
 python-multipart
-docker
+docker[websocket]
+shortuuid

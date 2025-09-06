@@ -1,5 +1,5 @@
 import redis
-import docker
+from docker import APIClient,DockerClient
 import time
 import json
 import os
@@ -17,7 +17,11 @@ EXECUTION_TIMEOUT = 10
 
 # --- REDIS & DOCKER CLIENTS ---
 r = redis.Redis(host="redis", port=6379, db=0, decode_responses=True)
-client = docker.from_env()
+
+client = DockerClient(base_url="unix:///var/run/docker.sock")
+api_client = APIClient(base_url="unix:///var/run/docker.sock")
+
+print("Docker clients initialized.")
 
 # --- BATCH JOB EXECUTION LOGIC ---
 def get_job_config(language):
@@ -91,9 +95,11 @@ async def websocket_handler(request):
     
     # Set appropriate command for each language
     if language == "python":
-        command = ["python3", "-i", "-q"]  # Interactive, quiet mode
+        command = ["python3", "-i", "-q"]
+        env = {}  # Interactive, quiet mode
     elif language == "javascript":
-        command = ["node", "-i"]  # Interactive node
+        command = ["node", "-i", "--no-warnings"]
+        env = {"NODE_NO_READLINE": "1"}  # Interactive node
     else:
         await ws.send_str(f"Error: Language {language} not supported for REPL")
         await ws.close()
@@ -113,15 +119,34 @@ async def websocket_handler(request):
             mem_limit="128m",  # Reduced memory limit
             cpu_quota=25000,   # Reduced CPU quota
             remove=True,       # Auto-remove when stopped
+            environment=env
         )
         
         # Create streams for stdin/stdout
-        stdout_stream = container.attach_socket(params={'stdout': 1, 'stream': 1, 'logs': 1})
-        stdin_stream = container.attach_socket(params={'stdin': 1, 'stream': 1})
-        
-        # Start background tasks for I/O forwarding
-        output_task = asyncio.create_task(forward_stream_to_websocket(stdout_stream, ws))
-        input_task = asyncio.create_task(forward_websocket_to_stream(ws, stdin_stream))
+        exec_id = api_client.exec_create(
+                    container.id,
+                    cmd=command,  # e.g. "python3" or "node"
+                    tty=True,
+                    stdin=True,
+                    stdout=True,
+                    stderr=True
+                    )["Id"]
+
+# Step 2: Attach to exec session socket
+        stream = api_client.exec_start(
+            exec_id,
+            tty=True,
+            socket=True,
+            stream=True
+        )
+
+        # Important: stream is a low-level socket wrapper
+        sock = stream._sock
+        sock.setblocking(False)
+
+        # Step 3: Start background tasks for I/O bridging
+        output_task = asyncio.create_task(forward_stream_to_websocket(sock, ws))
+        input_task = asyncio.create_task(forward_websocket_to_stream(ws, sock))
         
         # Wait for either task to complete (connection closed)
         done, pending = await asyncio.wait(
@@ -151,28 +176,28 @@ async def websocket_handler(request):
     
     return ws
 
-async def forward_stream_to_websocket(stream, websocket):
+async def forward_stream_to_websocket(sock, websocket):
     """Forward container output to websocket"""
+    loop=asyncio.get_running_loop()
     try:
         while not websocket.closed:
-            data = stream.read(1024)
+            data = await loop.sock_recv(sock, 1024)
             if not data:
                 break
             await websocket.send_str(data.decode('utf-8', 'ignore'))
     except Exception as e:
         print(f"Output forwarding error: {e}")
 
-async def forward_websocket_to_stream(websocket, stream):
+async def forward_websocket_to_stream(websocket, sock):
     """Forward websocket input to container"""
+    loop = asyncio.get_running_loop()
     try:
         async for msg in websocket:
             if msg.type == web.WSMsgType.TEXT:
                 # Ensure proper line ending for REPL
                 data = msg.data
-                if not data.endswith('\n'):
-                    data += '\n'
-                stream.write(data.encode('utf-8'))
-                stream.flush()
+
+                await loop.sock_sendall(sock, data.encode('utf-8'))
             elif msg.type in (web.WSMsgType.CLOSE, web.WSMsgType.ERROR):
                 break
     except Exception as e:
@@ -197,6 +222,7 @@ def main_job_loop():
         print("Worker exiting: Redis or Docker is not available.")
         return
     os.makedirs(TEMP_DIR_IN_WORKER, exist_ok=True)
+    
     print("Worker started. Waiting for batch jobs...")
     while True:
         try:
@@ -210,6 +236,7 @@ def main_job_loop():
             job_data["output"] = output
             job_data["status"] = "completed"
             r.set(f"job_{job_id}", json.dumps(job_data))
+            r.publish(f"job_updates_{job_id}", json.dumps(job_data))
             print(f"Job {job_id} completed.")
         except redis.exceptions.ConnectionError:
             print("Redis connection lost. Reconnecting in 5s...")

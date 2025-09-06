@@ -1,3 +1,5 @@
 redis
-docker
+docker>=6.1.3
+websocket-client>=1.5.0
 aiohttp
+requests==2.31.0

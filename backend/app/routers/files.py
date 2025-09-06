@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from .. import schemas, security, models
 from ..database import get_db
-
+import shortuuid
 router = APIRouter(prefix="/files", tags=["Files"])
 
 @router.post("", response_model=schemas.CodeFile)
@@ -40,3 +40,25 @@ async def delete_saved_file(file_id: int, db: Session = Depends(get_db), current
     db.delete(db_file)
     db.commit()
     return
+
+@router.post("/share/{file_id}")
+def share_codefile(file_id: int, db: Session = Depends(get_db), user: schemas.User = Depends(security.get_current_user)):
+    file = db.query(models.CodeFile).filter(models.CodeFile.id == file_id).first()
+    if not file:
+        raise HTTPException(404, "File not found")
+    
+    if not file.share_id:
+        file.share_id = shortuuid.uuid()[:8]  # generate 8-char share ID
+        db.commit()
+        db.refresh(file)
+    
+    share_url = f"http://localhost:3000/files/shared/{file.share_id}"
+    return {"share_url": share_url}
+
+@router.get("/{share_id}", response_model=schemas.SharedCodeFile)
+def get_shared_code(share_id: str, db: Session = Depends(get_db), user: schemas.User = Depends(security.get_current_user)):
+    file = db.query(models.CodeFile).filter(models.CodeFile.share_id == share_id).first()
+    if not file:
+        raise HTTPException(status_code=404, detail="Shared file not found")
+    return file
+

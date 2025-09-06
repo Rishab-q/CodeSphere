@@ -1,7 +1,7 @@
 import uuid
 import asyncio
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException,WebSocket,WebSocketDisconnect
 import json
 import redis
 from .. import schemas, security
@@ -18,15 +18,6 @@ async def submit_code(submission: schemas.CodeSubmission, current_user: schemas.
     r.set(f"job_{job_id}", job.json())
     r.lpush(f"user_jobs_{user_id}", job_id)
     r.lpush("job_queue", job_id)
-    return job
-
-@router.get("/status/{job_id}", response_model=schemas.Job)
-async def get_status(job_id: str, current_user: schemas.User = Depends(security.get_current_user), r: redis.Redis = Depends(get_redis_client)):
-    if not r: raise HTTPException(status_code=503, detail="Redis service is unavailable.")
-    job_json = r.get(f"job_{job_id}")
-    if job_json is None: raise HTTPException(status_code=404, detail="Job not found")
-    job = schemas.Job.parse_raw(job_json)
-    if job.user_id != current_user.username: raise HTTPException(status_code=403, detail="Not authorized to view this job")
     return job
 
 @router.get("/submissions", response_model=List[schemas.Job])
@@ -54,3 +45,40 @@ async def start_repl_session(
     r.set(f"repl_session_{session_id}", json.dumps(session_info), ex=60)
 
     return {"session_id": session_id}
+
+
+@router.websocket("/ws/status/{job_id}")
+async def job_status_ws(websocket: WebSocket, job_id: str, r: redis.Redis = Depends(get_redis_client)):
+    await websocket.accept()
+
+    # 1. Get latest snapshot
+    job_json = r.get(f"job_{job_id}")
+    if not job_json:
+        await websocket.send_json({"error": "Job not found"})
+        await websocket.close()
+        return
+
+    # Send snapshot first
+    job_data = json.loads(job_json)
+    await websocket.send_json(job_data)
+
+    # 2. Subscribe to updates
+    pubsub = r.pubsub()
+    pubsub.subscribe(f"job_updates_{job_id}")
+
+    try:
+        loop = asyncio.get_running_loop()
+        while True:
+            msg = await loop.run_in_executor(None, pubsub.get_message, False, 1.0)
+            if msg and msg["type"] == "message":
+                update = json.loads(msg["data"])
+                await websocket.send_json(update)
+
+                # Optionally close after completion
+                if update.get("status") == "completed":
+                    await websocket.close()
+                    break
+    except WebSocketDisconnect:
+        print(f"WebSocket disconnected for job {job_id}")
+    finally:
+        pubsub.close()
