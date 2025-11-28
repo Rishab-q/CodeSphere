@@ -55,7 +55,7 @@ def share_codefile(file_id: int, db: Session = Depends(get_db), user: schemas.Us
     share_url = f"http://localhost:3000/files/shared/{file.share_id}"
     return {"share_url": share_url}
 
-@router.get("/{share_id}", response_model=schemas.SharedCodeFile)
+@router.get("/shared/{share_id}", response_model=schemas.SharedCodeFile)
 def get_shared_code(share_id: str, db: Session = Depends(get_db), user: schemas.User = Depends(security.get_current_user)):
     file = db.query(models.CodeFile).filter(models.CodeFile.share_id == share_id).first()
     if not file:

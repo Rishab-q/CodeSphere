@@ -11,7 +11,7 @@ from . import models, schemas
 from .database import get_db
 
 # --- CONFIGURATION ---
-SECRET_KEY = "a_very_secret_key_that_should_be_in_an_env_file"
+SECRET_KEY = "1qwe23sgfbgbgbrbtrcd"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 

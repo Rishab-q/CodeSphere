@@ -26,7 +26,7 @@ const defaultCode = {
   javascript: `function greet(name) {\n    console.log(\`Hello, \${name}!\`);\n}\ngreet("World");`
 };
 
-// ---------------- InteractiveTerminal component stays unchanged ----------------
+// <---------------- InteractiveTerminal ---------------->
 import { Terminal as XTerm } from "xterm";
 import "xterm/css/xterm.css";
 
@@ -186,11 +186,14 @@ const { shareId } = useParams();
 
 useEffect(() => {
   const loadSharedFromUrl = async () => {
+    console.log(shareId);
+    console.log("HHH");
     if (!shareId) return;
 
     try {
-      const sharedFile = await apiService.request(`/files/${shareId}`, {
+      const sharedFile = await apiService.request(`/files/shared/${shareId}`, {
         method: "GET",
+        token,
       });
 
       setLanguage(sharedFile.language);
